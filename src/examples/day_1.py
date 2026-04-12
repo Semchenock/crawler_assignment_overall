@@ -1,6 +1,6 @@
 import asyncio
 import time
-from async_crawler.async_crawler import AsyncCrawler
+from src.async_crawler.async_crawler import AsyncCrawler
 
 async def main():
     crawler = AsyncCrawler(max_concurrent=5)
