@@ -29,3 +29,4 @@ ENV/
 *.log
 *.tmp
 
+/src/examples/output_day_2.json
