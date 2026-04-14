@@ -4,8 +4,10 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import logging
 
+from src.html_parser.models import ParseResult, ParsedMetadata, ParsedImage, ParsedHeaders
+
 class HtmlParser:
-    def parse_html(self, html: str, url: str) -> dict:
+    def parse_html(self, html: str, url: str) -> ParseResult:
         soup = BeautifulSoup(html, "lxml")
 
         metadata = self.extract_metadata(soup)
@@ -16,20 +18,20 @@ class HtmlParser:
         tables = self.extract_tables(soup=soup)
         lists = self.extract_lists(soup=soup)
 
-        return {
-            "url": url,
-            "title": metadata.get("title"),
-            "text": text,
-            "links": links,
-            "metadata": metadata,
-            "imgs": imgs,
-            "headers": headers,
-            "tables": tables,
-            "lists": lists,
-            "text_length": len(text),
-            "links_count": len(links),
-            "images_count": len(imgs),
-        }
+        return ParseResult(
+            url=url,
+            title=metadata.title,
+            text=text,
+            links=links,
+            metadata=metadata,
+            imgs=imgs,
+            headers=headers,
+            tables=tables,
+            lists=lists,
+            text_length=len(text),
+            links_count=len(links),
+            images_count=len(imgs),
+        )
 
     @staticmethod
     def prepare_url(url: str) -> str:
@@ -97,23 +99,23 @@ class HtmlParser:
 
         return None
 
-    def extract_metadata(self, soup: BeautifulSoup) -> dict:
+    def extract_metadata(self, soup: BeautifulSoup) -> ParsedMetadata:
         title_tag = soup.find("title")
 
         title = title_tag.get_text(strip=True) if title_tag else None
         description = self.find_meta(soup, "description")
         keywords = self.find_meta(soup, "keywords")
 
-        return {
-            "title": title,
-            "description": description,
-            "keywords": keywords,
-        }
+        return ParsedMetadata(
+            title=title,
+            description=description,
+            keywords=keywords,
+        )
 
-    def extract_imgs(self, soup: BeautifulSoup, base_url:str) -> list[dict]:
+    def extract_imgs(self, soup: BeautifulSoup, base_url:str) -> list[ParsedImage]:
         imgs = soup.find_all("img")
 
-        imgs_srcs = []
+        imgs_srcs:list[ParsedImage] = []
         for img in imgs:
             src = img.get("src")
 
@@ -125,22 +127,21 @@ class HtmlParser:
 
             alt = img.get("alt")
 
-            imgs_srcs.append({"src": absolute_src, "alt": alt })
+            imgs_srcs.append(ParsedImage(src=absolute_src, alt=alt))
 
         return imgs_srcs
 
     @staticmethod
-    def extract_headers(soup: BeautifulSoup) -> dict[str, list[str]]:
-        result = {}
+    def extract_headers(soup: BeautifulSoup) -> ParsedHeaders:
+        result = ParsedHeaders()
 
         for i in range(6):
-            element_name = f"h{i+1}"
+            element_name = f"h{i + 1}"
             h_elements = soup.find_all(element_name)
-            h_texts = []
-            for h_element in h_elements:
-                h_texts.append(h_element.get_text(strip=True))
 
-            result[element_name] = h_texts
+            h_texts = [h.get_text(strip=True) for h in h_elements]
+
+            setattr(result, element_name, h_texts)
 
         return result
 
