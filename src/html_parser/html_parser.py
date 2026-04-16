@@ -50,8 +50,6 @@ class HtmlParser:
         return urljoin(base_url, link)
 
     def extract_links(self, soup: BeautifulSoup, base_url: str) -> list[str]:
-        base_netloc = urlparse(base_url).netloc
-
         links = []
 
         for a in soup.find_all("a"):
@@ -65,12 +63,6 @@ class HtmlParser:
 
             if parsed.scheme not in ("http", "https"):
                 logging.warning(f"Link is not http or https: {absolute}")
-                continue
-
-            is_external = parsed.netloc != base_netloc
-
-            if is_external:
-                logging.warning(f"Link is external: {absolute}")
                 continue
 
             links.append(absolute)

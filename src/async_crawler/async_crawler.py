@@ -139,6 +139,18 @@ class AsyncCrawler:
                 self.failed_urls[url] = result
                 await self.crawler_queue.mark_failed(url, result.error)
 
+    def reset(self):
+        self.visited_urls = set()
+        self.processed_urls = {}
+        self.failed_urls = {}
+        self.start_time = asyncio.get_event_loop().time()
+        self.start_urls = []
+        self.max_depth = 0
+        self.same_domain_only = False
+        self.exclude_patern = None
+        self.include_patern = None
+        self.crawler_queue = CrawlerQueue()
+
     async def crawl(
             self,
             start_urls: list[str],
@@ -148,6 +160,7 @@ class AsyncCrawler:
             exclude_patern: Optional[str] = None,
             include_patern: Optional[str] = None,
     ) -> CrawlResult:
+        self.reset()
         self.start_urls = start_urls
         self.max_depth = max_depth
         self.same_domain_only = same_domain_only
