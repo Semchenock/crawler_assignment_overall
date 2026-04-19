@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from src.async_crawler.enums import FetchResultStatus
+from src.async_crawler.enums import FetchResultStatus, ErrorTypes
 from src.html_parser.models import ParseResult
 
 
@@ -11,6 +11,7 @@ class FetchResult:
     status: FetchResultStatus
     html: Optional[str] = None
     error: Optional[str] = None
+    error_type: Optional[ErrorTypes] = None
     parsed: Optional[ParseResult] = None
 
 @dataclass
