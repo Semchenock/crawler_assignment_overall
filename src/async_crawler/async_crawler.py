@@ -7,13 +7,18 @@ from typing import Optional
 from urllib.parse import urlparse
 import re
 
-from src.async_crawler.models import FetchResult, CrawlResult
+from src.async_crawler.models import FetchResult, CrawlResult, BlockedByRobots
 from src.async_crawler.enums import FetchResultStatus, ErrorTypes
+from src.error_log.error_log import ErrorLog
 from src.html_parser.html_parser import HtmlParser
 from src.crawler_queue.crawler_queue import CrawlerQueue
 from src.rate_limiter.rate_limiter import RateLimiter
+from src.retry_strategy.constants import STATUS_CODES_TO_ERROR, CUSTOM_ERRORS
+from src.retry_strategy.models import PermanentError, TransientError, NetworkError, ParseError, RetryCountExceeded, ErrorType
+from src.retry_strategy.retry_stategy import RetryStrategy
 from src.robots_parser.robots_parser import RobotsParser
 from src.semaphore_manager.semaphore_manager import SemaphoreManager
+from src.timeout_manager.timeout_manager import TimeoutConfig
 
 logging.basicConfig(level=logging.INFO)
 
@@ -26,6 +31,9 @@ class AsyncCrawler:
         self.rate_limiter = RateLimiter(per_domain=respect_robots, min_interval=min_interval, max_jitter=max_jitter)
         self.crawler_queue = CrawlerQueue()
         self.robots_parser = RobotsParser(respect_robots=respect_robots)
+        self.error_log = ErrorLog()
+        self.retry_strategy = RetryStrategy(error_log=self.error_log)
+        self.timeout_config = TimeoutConfig()
         self.visited_urls = set()
         self.processed_urls: dict[str, FetchResult] = {}
         self.failed_urls: dict[str, FetchResult] = {}
@@ -48,7 +56,7 @@ class AsyncCrawler:
         )
         self.session = aiohttp.ClientSession(timeout=timeout)
 
-    async def _process_robots_txt(self, url: str) -> bool:
+    async def _process_robots_txt(self, url: str):
         try:
             await self.robots_parser.fetch_robots(url)
             interval = self.robots_parser.get_crawl_delay(url, self.user_agent)
@@ -56,11 +64,12 @@ class AsyncCrawler:
                 self.rate_limiter.set_domain_interval(url, interval)
 
             is_allowed_url = self.robots_parser.can_fetch(url, self.user_agent)
-            return is_allowed_url
+            if not is_allowed_url:
+                raise BlockedByRobots()
 
         except Exception as e:
             logging.warning(f"Failed crawling robots.txt {e}")
-            return True
+            raise
 
 
 
@@ -71,15 +80,12 @@ class AsyncCrawler:
                 yield
 
     async def fetch_url(self, url: str) -> FetchResult:
-        error_args = {"url": url, "status": FetchResultStatus.FAILED}
-
         await self._init_session()
-        can_fetch_url = await self._process_robots_txt(url)
 
-        if not can_fetch_url:
-            error_msg= f"Prohibited by robots.txt {url}"
-            logging.warning(error_msg)
-            return FetchResult(**error_args, error_type=ErrorTypes.BLOCKED_BY_ROBOTS, error=error_msg)
+        try:
+            await self._process_robots_txt(url)
+        except BlockedByRobots:
+            raise PermanentError()
 
         async with self._acquire(url):
             logging.info(f"▶️ Start {url}")
@@ -88,22 +94,16 @@ class AsyncCrawler:
                 async with self.session.get(url) as response:
                     response.raise_for_status()
                     text = await response.text()
-
                     logging.info(f"✅ Done {url}")
                     return FetchResult(url=url, status=FetchResultStatus.FINISHED, html=text)
 
             except aiohttp.ClientResponseError as e:
-                error_msg = f"🚫 HTTP error {url}: {e.status}"
-                logging.warning(error_msg)
-                return FetchResult(**error_args, error_type=ErrorTypes.HTTP, error=error_msg)
+                error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
+                raise error()
             except asyncio.TimeoutError:
-                error_msg= f"⏰ Timeout {url}"
-                logging.warning(error_msg)
-                return FetchResult(**error_args, error_type=ErrorTypes.TIMEOUT, error=error_msg)
-            except aiohttp.ClientError as e:
-                error_msg = f"❌ Network error {url}: {e}"
-                logging.warning(error_msg)
-                return FetchResult(**error_args, error_type=ErrorTypes.NETWORK, error=error_msg)
+                raise TransientError()
+            except aiohttp.ClientError:
+                raise NetworkError()
 
     async def fetch_urls(self, urls: list[str]) -> dict[str, FetchResult]:
         tasks = [asyncio.create_task(self.fetch_url(url)) for url in urls]
@@ -112,13 +112,74 @@ class AsyncCrawler:
 
         return dict(zip(urls, results))
 
+    async def _fetch_raw(self, url: str, timeout_cfg: dict):
+        timeout = aiohttp.ClientTimeout(
+            sock_connect=timeout_cfg["connect"],
+            sock_read=timeout_cfg["read"],
+            total=timeout_cfg["total"],
+        )
+
+        await self._init_session()
+
+        try:
+            await self._process_robots_txt(url)
+        except BlockedByRobots:
+            raise PermanentError()
+
+        try:
+            async with self.session.get(url, timeout=timeout) as response:
+                response.raise_for_status()
+                return await response.text()
+        except aiohttp.ClientResponseError as e:
+            error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
+            raise error()
+        except asyncio.TimeoutError:
+            raise TransientError()
+        except aiohttp.ClientError:
+            raise NetworkError()
+
+
+    async def _fetch_and_parse_inner(self, url: str, timeout_cfg: dict) -> FetchResult:
+        html = await self._fetch_raw(url, timeout_cfg)
+
+        try:
+            parsed = self.html_parser.parse_html(html=html, url=url)
+        except Exception:
+            raise ParseError()
+
+        return FetchResult(
+            url=url,
+            status=FetchResultStatus.FINISHED,
+            html=html,
+            parsed=parsed
+        )
+
+    async def _fetch_and_parse_url_raw(self, url: str, attempt: int = 0) -> FetchResult:
+        timeout_cfg = self.timeout_config.for_attempt(attempt)
+
+        try:
+            result = await asyncio.wait_for(
+                self._fetch_and_parse_inner(url, timeout_cfg),
+                timeout=timeout_cfg["total"]
+            )
+            return result
+        except asyncio.TimeoutError:
+            raise TransientError()
+
     async def fetch_and_parse_url(self, url: str) -> FetchResult:
-        result = await self.fetch_url(url)
-
-        if result.status == FetchResultStatus.FINISHED:
-            result.parsed = self.html_parser.parse_html(html=result.html, url=url)
-
-        return result
+        try:
+            result = await self.retry_strategy.execute_with_retry(self._fetch_and_parse_url_raw, url)
+            self.error_log.mark_finished(url)
+            return result
+        except RetryCountExceeded as e:
+            self.error_log.mark_failed(url)
+            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}")
+        except CUSTOM_ERRORS as e:
+            self.error_log.mark_failed(url)
+            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}")
+        except Exception as e:
+            self.error_log.mark_failed(url)
+            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}")
 
     async def fetch_and_parse_urls(self, urls: list[str]) -> dict[str, FetchResult]:
         tasks = [asyncio.create_task(self.fetch_and_parse_url(url)) for url in urls]
@@ -162,9 +223,11 @@ class AsyncCrawler:
                 return
 
             self.visited_urls.add(url)
+            print(f"Start crawling {url}")
             result = await self.fetch_and_parse_url(url)
 
             if result.status == FetchResultStatus.FINISHED:
+                print(f"Finished crawling {url}")
                 self.processed_urls[url] = result
                 await self.crawler_queue.mark_processed(url)
 
@@ -173,6 +236,7 @@ class AsyncCrawler:
                         await self.crawler_queue.add_url(link, priority=priority+1, depth=depth+1)
 
             elif result.status == FetchResultStatus.FAILED:
+                print(f"Failed crawling {url}")
                 self.failed_urls[url] = result
                 await self.crawler_queue.mark_failed(url, result.error)
 
@@ -198,6 +262,7 @@ class AsyncCrawler:
             exclude_patern: Optional[str] = None,
             include_patern: Optional[str] = None,
             user_agent: Optional[str] = None,
+            disable_speed_log: Optional[bool] = False,
     ) -> CrawlResult:
         self.reset()
         self.start_urls = start_urls
@@ -218,7 +283,8 @@ class AsyncCrawler:
         # Скорость обработки (страниц/сек)
         while len(self.processed_urls) < max_pages:
             await asyncio.sleep(0.2)
-            print(print(self.crawler_queue.get_stats()))
+            if not disable_speed_log:
+                print(print(self.crawler_queue.get_stats()))
             elapsed = asyncio.get_event_loop().time() - self.start_time
             speed = len(self.processed_urls) / elapsed if elapsed > 0 else 0
             avg_interval = 1/speed if speed > 0 else 0
@@ -227,9 +293,10 @@ class AsyncCrawler:
                 if res.error_type == ErrorTypes.BLOCKED_BY_ROBOTS
             ])
 
-            print(f"Speed: {speed:.2f} pages/sec")
-            print(f"Average interval: {avg_interval:.2f} sec")
-            print(f"Blocked by robots.txt: {blocked_by_robots_count}")
+            if not disable_speed_log:
+                print(f"Speed: {speed:.2f} pages/sec")
+                print(f"Average interval: {avg_interval:.2f} sec")
+                print(f"Blocked by robots.txt: {blocked_by_robots_count}")
 
             if (len(self.crawler_queue.created) + len(self.crawler_queue.running)) == 0:
                 break
