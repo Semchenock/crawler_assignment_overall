@@ -18,3 +18,6 @@ class FetchResult:
 class CrawlResult:
     failed_urls: dict[str, FetchResult]
     processed_urls: dict[str, FetchResult]
+
+class BlockedByRobots(Exception):
+    pass
