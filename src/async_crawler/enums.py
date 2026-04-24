@@ -9,3 +9,4 @@ class ErrorTypes(Enum):
     HTTP = 'HTTP'
     TIMEOUT = 'TIMEOUT'
     NETWORK = 'NETWORK'
+    RETRY_EXCEEDED='RETRY_EXCEEDED'
