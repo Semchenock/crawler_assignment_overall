@@ -30,3 +30,6 @@ ENV/
 *.tmp
 
 /src/examples/*.json
+/src/examples/*.jsonl
+/src/examples/*.csv
+/src/examples/*.db

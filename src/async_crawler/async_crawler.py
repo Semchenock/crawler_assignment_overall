@@ -1,5 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import asdict
+from datetime import datetime
 
 import aiohttp
 import logging
@@ -9,6 +11,7 @@ import re
 
 from src.async_crawler.models import FetchResult, CrawlResult, BlockedByRobots
 from src.async_crawler.enums import FetchResultStatus, ErrorTypes
+from src.data_storage.base import BaseDataStorage
 from src.error_log.error_log import ErrorLog
 from src.html_parser.html_parser import HtmlParser
 from src.crawler_queue.crawler_queue import CrawlerQueue
@@ -19,11 +22,20 @@ from src.retry_strategy.retry_stategy import RetryStrategy
 from src.robots_parser.robots_parser import RobotsParser
 from src.semaphore_manager.semaphore_manager import SemaphoreManager
 from src.timeout_manager.timeout_manager import TimeoutConfig
+from src.data_storage.model import DataItem
 
 logging.basicConfig(level=logging.INFO)
 
 class AsyncCrawler:
-    def __init__(self, max_concurrent: int = 10, max_per_domain: int = 10, min_interval: Optional[float] = None, respect_robots=True, max_jitter: float=0.0):
+    def __init__(
+        self,
+        max_concurrent: int = 10,
+        max_per_domain: int = 10,
+        min_interval: Optional[float] = None,
+        respect_robots = True,
+        max_jitter: float = 0.0,
+        storage: Optional[BaseDataStorage] = None
+    ):
         self.max_concurrent = max_concurrent
         self.semaphore_manager = SemaphoreManager(max_global=max_concurrent, max_per_domain=max_per_domain)
         self.session = None
@@ -34,6 +46,7 @@ class AsyncCrawler:
         self.error_log = ErrorLog()
         self.retry_strategy = RetryStrategy(error_log=self.error_log)
         self.timeout_config = TimeoutConfig()
+        self.storage = storage
         self.visited_urls = set()
         self.processed_urls: dict[str, FetchResult] = {}
         self.failed_urls: dict[str, FetchResult] = {}
@@ -71,6 +84,24 @@ class AsyncCrawler:
             logging.warning(f"Failed crawling robots.txt {e}")
             raise
 
+    async def _save_to_storage(self, data: FetchResult):
+        if data.status == FetchResultStatus.FAILED or data.parsed is None:
+            return
+
+        parsed_data = data.parsed
+
+        data_item = DataItem(
+            url=parsed_data.url,
+            text=parsed_data.text,
+            title=parsed_data.title if parsed_data.title is not None else "",
+            links=parsed_data.links,
+            metadata=asdict(parsed_data.metadata),
+            crawled_at=datetime.now(),
+            status_code=data.status_code if data.status_code is not None else 0,
+            content_type=data.content_type if data.content_type is not None else "",
+        )
+
+        await self.storage.save(data_item)
 
 
     @asynccontextmanager
@@ -112,7 +143,7 @@ class AsyncCrawler:
 
         return dict(zip(urls, results))
 
-    async def _fetch_raw(self, url: str, timeout_cfg: dict):
+    async def _fetch_raw(self, url: str, timeout_cfg: dict) -> FetchResult:
         timeout = aiohttp.ClientTimeout(
             sock_connect=timeout_cfg["connect"],
             sock_read=timeout_cfg["read"],
@@ -129,7 +160,16 @@ class AsyncCrawler:
         try:
             async with self.session.get(url, timeout=timeout) as response:
                 response.raise_for_status()
-                return await response.text()
+                response_content_type = response.headers.get("Content-Type")
+                status_code = response.status
+                text = await response.text()
+                return FetchResult(
+                    url=url,
+                    status=FetchResultStatus.FINISHED,
+                    html=text,
+                    content_type=response_content_type,
+                    status_code=status_code
+                )
         except aiohttp.ClientResponseError as e:
             error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
             raise error()
@@ -140,19 +180,15 @@ class AsyncCrawler:
 
 
     async def _fetch_and_parse_inner(self, url: str, timeout_cfg: dict) -> FetchResult:
-        html = await self._fetch_raw(url, timeout_cfg)
+        result = await self._fetch_raw(url, timeout_cfg)
 
         try:
-            parsed = self.html_parser.parse_html(html=html, url=url)
+            parsed = self.html_parser.parse_html(html=result.html, url=url)
+            result.parsed = parsed
         except Exception:
             raise ParseError()
 
-        return FetchResult(
-            url=url,
-            status=FetchResultStatus.FINISHED,
-            html=html,
-            parsed=parsed
-        )
+        return result
 
     async def _fetch_and_parse_url_raw(self, url: str, attempt: int = 0) -> FetchResult:
         timeout_cfg = self.timeout_config.for_attempt(attempt)
@@ -235,6 +271,9 @@ class AsyncCrawler:
                     if self.should_visit_url(url=link, depth=depth+1):
                         await self.crawler_queue.add_url(link, priority=priority+1, depth=depth+1)
 
+                if self.storage:
+                    await self._save_to_storage(result)
+
             elif result.status == FetchResultStatus.FAILED:
                 print(f"Failed crawling {url}")
                 self.failed_urls[url] = result
@@ -309,5 +348,8 @@ class AsyncCrawler:
     async def close(self):
         if self.session:
             await self.session.close()
+
+        if self.storage:
+            await self.storage.close()
 
         await self.robots_parser.close()
