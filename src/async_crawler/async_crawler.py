@@ -116,7 +116,7 @@ class AsyncCrawler:
             async with self.rate_limiter(url):
                 yield
 
-    async def fetch_url(self, url: str) -> FetchResult:
+    async def fetch_url(self, url: str) -> str:
         await self._init_session()
 
         try:
@@ -132,20 +132,23 @@ class AsyncCrawler:
                     response.raise_for_status()
                     text = await response.text()
                     logging.info(f"✅ Done {url}")
-                    return FetchResult(url=url, status=FetchResultStatus.FINISHED, html=text)
+                    return text
 
             except aiohttp.ClientResponseError as e:
-                error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
-                raise error()
-            except asyncio.TimeoutError:
-                raise TransientError()
-            except aiohttp.ClientError:
-                raise NetworkError()
+                logging.warning(f"🚫 HTTP error {url}: {e.status}")
 
-    async def fetch_urls(self, urls: list[str]) -> dict[str, FetchResult]:
+            except asyncio.TimeoutError:
+                logging.warning(f"⏰ Timeout {url}")
+
+            except aiohttp.ClientError as e:
+                logging.warning(f"❌ Network error {url}: {e}")
+
+            return ""
+
+    async def fetch_urls(self, urls: list[str]) -> dict[str, str]:
         tasks = [asyncio.create_task(self.fetch_url(url)) for url in urls]
 
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         return dict(zip(urls, results))
 
