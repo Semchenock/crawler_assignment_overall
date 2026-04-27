@@ -31,7 +31,8 @@ class AsyncCrawler:
         self,
         max_concurrent: int = 10,
         max_per_domain: int = 10,
-        min_interval: Optional[float] = None,
+        min_interval: Optional[float] = 0.0,
+        requests_per_second: Optional[float] = 1.0,
         respect_robots = True,
         max_jitter: float = 0.0,
         storage: Optional[BaseDataStorage] = None
@@ -40,7 +41,12 @@ class AsyncCrawler:
         self.semaphore_manager = SemaphoreManager(max_global=max_concurrent, max_per_domain=max_per_domain)
         self.session = None
         self.html_parser = HtmlParser()
-        self.rate_limiter = RateLimiter(per_domain=respect_robots, min_interval=min_interval, max_jitter=max_jitter)
+        self.rate_limiter = RateLimiter(
+            per_domain=respect_robots,
+            min_interval=min_interval,
+            max_jitter=max_jitter,
+            requests_per_second=requests_per_second
+        )
         self.crawler_queue = CrawlerQueue()
         self.robots_parser = RobotsParser(respect_robots=respect_robots)
         self.error_log = ErrorLog()
@@ -73,8 +79,9 @@ class AsyncCrawler:
         try:
             await self.robots_parser.fetch_robots(url)
             interval = self.robots_parser.get_crawl_delay(url, self.user_agent)
+            domain = urlparse(url).hostname
             if interval:
-                self.rate_limiter.set_domain_interval(url, interval)
+                self.rate_limiter.set_domain_interval(domain, interval)
 
             is_allowed_url = self.robots_parser.can_fetch(url, self.user_agent)
             if not is_allowed_url:
@@ -110,13 +117,13 @@ class AsyncCrawler:
             async with self.rate_limiter(url):
                 yield
 
-    async def fetch_url(self, url: str) -> FetchResult:
+    async def fetch_url(self, url: str) -> str:
         await self._init_session()
 
         try:
             await self._process_robots_txt(url)
         except BlockedByRobots:
-            raise PermanentError()
+            logging.warning(f"🚫 Blocked by robots.txt {url}")
 
         async with self._acquire(url):
             logging.info(f"▶️ Start {url}")
@@ -126,20 +133,23 @@ class AsyncCrawler:
                     response.raise_for_status()
                     text = await response.text()
                     logging.info(f"✅ Done {url}")
-                    return FetchResult(url=url, status=FetchResultStatus.FINISHED, html=text)
+                    return text
 
             except aiohttp.ClientResponseError as e:
-                error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
-                raise error()
-            except asyncio.TimeoutError:
-                raise TransientError()
-            except aiohttp.ClientError:
-                raise NetworkError()
+                logging.warning(f"🚫 HTTP error {url}: {e.status}")
 
-    async def fetch_urls(self, urls: list[str]) -> dict[str, FetchResult]:
+            except asyncio.TimeoutError:
+                logging.warning(f"⏰ Timeout {url}")
+
+            except aiohttp.ClientError as e:
+                logging.warning(f"❌ Network error {url}: {e}")
+
+            return ""
+
+    async def fetch_urls(self, urls: list[str]) -> dict[str, str]:
         tasks = [asyncio.create_task(self.fetch_url(url)) for url in urls]
 
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         return dict(zip(urls, results))
 
