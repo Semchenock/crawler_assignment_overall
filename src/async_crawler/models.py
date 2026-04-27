@@ -13,6 +13,8 @@ class FetchResult:
     error: Optional[str] = None
     error_type: Optional[ErrorTypes] = None
     parsed: Optional[ParseResult] = None
+    status_code: Optional[int] = None
+    content_type: Optional[str] = None
 
 @dataclass
 class CrawlResult:

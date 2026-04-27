@@ -2,6 +2,7 @@ import asyncio
 import random
 from collections import Counter
 from typing import Optional, Callable, Awaitable, Any
+import traceback
 
 from .models import RetryRule, RetryCountExceeded
 from .constants import DEFAULT_RULES, CUSTOM_ERRORS
@@ -64,6 +65,8 @@ class RetryStrategy:
 
             except Exception as e:
                 print(f"caught UNKNOWN error {e.__class__.__name__} in url {url}")
+                print(e)
+                traceback.print_exc()
 
 
         raise RetryCountExceeded("Global retry limit exceeded")
