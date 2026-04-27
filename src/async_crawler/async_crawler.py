@@ -32,6 +32,7 @@ class AsyncCrawler:
         max_concurrent: int = 10,
         max_per_domain: int = 10,
         min_interval: Optional[float] = None,
+        requests_per_second: Optional[float] = None,
         respect_robots = True,
         max_jitter: float = 0.0,
         storage: Optional[BaseDataStorage] = None
@@ -40,7 +41,12 @@ class AsyncCrawler:
         self.semaphore_manager = SemaphoreManager(max_global=max_concurrent, max_per_domain=max_per_domain)
         self.session = None
         self.html_parser = HtmlParser()
-        self.rate_limiter = RateLimiter(per_domain=respect_robots, min_interval=min_interval, max_jitter=max_jitter)
+        self.rate_limiter = RateLimiter(
+            per_domain=respect_robots,
+            min_interval=min_interval,
+            max_jitter=max_jitter,
+            requests_per_second=requests_per_second
+        )
         self.crawler_queue = CrawlerQueue()
         self.robots_parser = RobotsParser(respect_robots=respect_robots)
         self.error_log = ErrorLog()
