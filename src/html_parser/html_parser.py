@@ -44,9 +44,6 @@ class HtmlParser:
 
     @staticmethod
     def get_absolute_link(base_url: str, link: str) -> str:
-        if not base_url.endswith("/"):
-            base_url += "/"
-
         return urljoin(base_url, link)
 
     def extract_links(self, soup: BeautifulSoup, base_url: str) -> list[str]:
