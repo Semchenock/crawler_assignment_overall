@@ -31,8 +31,8 @@ class AsyncCrawler:
         self,
         max_concurrent: int = 10,
         max_per_domain: int = 10,
-        min_interval: Optional[float] = None,
-        requests_per_second: Optional[float] = None,
+        min_interval: Optional[float] = 0.0,
+        requests_per_second: Optional[float] = 1.0,
         respect_robots = True,
         max_jitter: float = 0.0,
         storage: Optional[BaseDataStorage] = None
