@@ -79,8 +79,9 @@ class AsyncCrawler:
         try:
             await self.robots_parser.fetch_robots(url)
             interval = self.robots_parser.get_crawl_delay(url, self.user_agent)
+            domain = urlparse(url).hostname
             if interval:
-                self.rate_limiter.set_domain_interval(url, interval)
+                self.rate_limiter.set_domain_interval(domain, interval)
 
             is_allowed_url = self.robots_parser.can_fetch(url, self.user_agent)
             if not is_allowed_url:
@@ -122,7 +123,7 @@ class AsyncCrawler:
         try:
             await self._process_robots_txt(url)
         except BlockedByRobots:
-            raise PermanentError()
+            logging.warning(f"🚫 Blocked by robots.txt {url}")
 
         async with self._acquire(url):
             logging.info(f"▶️ Start {url}")
