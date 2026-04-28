@@ -8,10 +8,11 @@ from src.robots_parser.constants import DEFAULT_AGENT
 
 
 class RobotsParser:
-    def __init__(self,respect_robots: bool = True):
+    def __init__(self,respect_robots: bool = True, user_agent: Optional[str] = None):
         self.session = None
         self.respect_robots = respect_robots
         self.robots_by_domain = {}
+        self.user_agent = user_agent
 
     async def _init_session(self):
         if self.session is not None:
@@ -22,7 +23,12 @@ class RobotsParser:
             connect=3,
             sock_read=5
         )
-        self.session = aiohttp.ClientSession(timeout=timeout)
+        headers = {}
+
+        if self.user_agent is not None:
+            headers["User-Agent"] = self.user_agent
+
+        self.session = aiohttp.ClientSession(timeout=timeout, headers=headers)
 
     @staticmethod
     def parse_robots_by_agents(text: str) -> dict:

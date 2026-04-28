@@ -35,8 +35,10 @@ class AsyncCrawler:
         requests_per_second: Optional[float] = 1.0,
         respect_robots = True,
         max_jitter: float = 0.0,
-        storage: Optional[BaseDataStorage] = None
+        storage: Optional[BaseDataStorage] = None,
+        user_agent: Optional[str] = None
     ):
+        self.user_agent: Optional[str] = user_agent
         self.max_concurrent = max_concurrent
         self.semaphore_manager = SemaphoreManager(max_global=max_concurrent, max_per_domain=max_per_domain)
         self.session = None
@@ -48,7 +50,7 @@ class AsyncCrawler:
             requests_per_second=requests_per_second
         )
         self.crawler_queue = CrawlerQueue()
-        self.robots_parser = RobotsParser(respect_robots=respect_robots)
+        self.robots_parser = RobotsParser(respect_robots=respect_robots, user_agent=user_agent)
         self.error_log = ErrorLog()
         self.retry_strategy = RetryStrategy(error_log=self.error_log)
         self.timeout_config = TimeoutConfig()
@@ -61,7 +63,6 @@ class AsyncCrawler:
         self.same_domain_only: bool = False
         self.exclude_patern: Optional[str] = None
         self.include_patern: Optional[str] = None
-        self.user_agent: Optional[str] = None
         self.start_time = asyncio.get_event_loop().time()
 
     async def _init_session(self):
@@ -73,7 +74,12 @@ class AsyncCrawler:
             connect=3,
             sock_read=5
         )
-        self.session = aiohttp.ClientSession(timeout=timeout)
+        headers = {}
+
+        if self.user_agent is not None:
+            headers["User-Agent"] = self.user_agent
+
+        self.session = aiohttp.ClientSession(timeout=timeout, headers=headers)
 
     async def _process_robots_txt(self, url: str):
         try:
@@ -301,7 +307,6 @@ class AsyncCrawler:
         self.same_domain_only = False
         self.exclude_patern = None
         self.include_patern = None
-        self.user_agent = None
         self.crawler_queue = CrawlerQueue()
 
     async def crawl(
@@ -312,7 +317,6 @@ class AsyncCrawler:
             same_domain_only: bool = False,
             exclude_patern: Optional[str] = None,
             include_patern: Optional[str] = None,
-            user_agent: Optional[str] = None,
             disable_speed_log: Optional[bool] = False,
     ) -> CrawlResult:
         self.reset()
@@ -321,7 +325,6 @@ class AsyncCrawler:
         self.same_domain_only = same_domain_only
         self.exclude_patern = exclude_patern
         self.include_patern = include_patern
-        self.user_agent = user_agent
 
         for url in start_urls:
             await self.crawler_queue.add_url(url, priority=0)

@@ -42,7 +42,8 @@ async def main():
         max_per_domain=2,
         min_interval=1.0,
         max_jitter=0.5,
-        respect_robots=True
+        respect_robots=True,
+        user_agent="MyCrawlerBot/1.0",
     )
 
     print("🚀 Start crawling...\n")
@@ -52,7 +53,6 @@ async def main():
         max_pages=20,
         max_depth=1,
         same_domain_only=False,
-        user_agent="MyCrawlerBot/1.0",
         disable_speed_log=True
     )
 
