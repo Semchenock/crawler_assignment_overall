@@ -1,3 +1,4 @@
+from src.async_crawler.enums import ErrorTypes
 from src.retry_strategy.models import RetryRule, TransientError, NetworkError, PermanentError, ParseError
 
 DEFAULT_RULES = [
@@ -21,9 +22,21 @@ ERRORS_TO_STATUS_CODES = {
     NetworkError: [500, 501, 502, 504],
 }
 
+ERROR_TYPES_TO_STATUS_CODES = {
+    ErrorTypes.NETWORK: [503, 429],
+    ErrorTypes.HTTP: [404, 403, 401],
+    ErrorTypes.TIMEOUT: [500, 501, 502, 504],
+}
+
 STATUS_CODES_TO_ERROR = {
     code: error
     for error, codes in ERRORS_TO_STATUS_CODES.items()
+    for code in codes
+}
+
+STATUS_CODES_TO_ERROR_TYPES = {
+    code: error
+    for error, codes in ERROR_TYPES_TO_STATUS_CODES.items()
     for code in codes
 }
 

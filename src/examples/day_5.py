@@ -52,8 +52,7 @@ async def main():
         start_urls=start_urls,
         max_pages=20,
         max_depth=1,
-        same_domain_only=False,
-        disable_speed_log=True
+        same_domain_only=False
     )
 
     print("\n📊 FINAL STATS")

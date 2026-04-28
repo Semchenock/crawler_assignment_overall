@@ -16,8 +16,8 @@ from src.error_log.error_log import ErrorLog
 from src.html_parser.html_parser import HtmlParser
 from src.crawler_queue.crawler_queue import CrawlerQueue
 from src.rate_limiter.rate_limiter import RateLimiter
-from src.retry_strategy.constants import STATUS_CODES_TO_ERROR, CUSTOM_ERRORS
-from src.retry_strategy.models import PermanentError, TransientError, NetworkError, ParseError, RetryCountExceeded, ErrorType
+from src.retry_strategy.constants import STATUS_CODES_TO_ERROR, CUSTOM_ERRORS, STATUS_CODES_TO_ERROR_TYPES
+from src.retry_strategy.models import PermanentError, TransientError, NetworkError, ParseError, RetryCountExceeded
 from src.retry_strategy.retry_stategy import RetryStrategy
 from src.robots_parser.robots_parser import RobotsParser
 from src.semaphore_manager.semaphore_manager import SemaphoreManager
@@ -172,7 +172,7 @@ class AsyncCrawler:
         try:
             await self._process_robots_txt(url)
         except BlockedByRobots:
-            raise PermanentError()
+            raise PermanentError(error_type=ErrorTypes.BLOCKED_BY_ROBOTS)
 
         async with self._acquire(url):
             try:
@@ -190,11 +190,12 @@ class AsyncCrawler:
                     )
             except aiohttp.ClientResponseError as e:
                 error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
-                raise error()
+                error_type = STATUS_CODES_TO_ERROR_TYPES.get(e.status, ErrorTypes.UNKNOWN)
+                raise error(error_type=error_type)
             except asyncio.TimeoutError:
-                raise TransientError()
+                raise TransientError(error_type=ErrorTypes.TIMEOUT)
             except aiohttp.ClientError:
-                raise NetworkError()
+                raise NetworkError(error_type=ErrorTypes.NETWORK)
 
 
     async def _fetch_and_parse_inner(self, url: str, timeout_cfg: dict) -> FetchResult:
@@ -204,7 +205,7 @@ class AsyncCrawler:
             parsed = self.html_parser.parse_html(html=result.html, url=url)
             result.parsed = parsed
         except Exception:
-            raise ParseError()
+            raise ParseError(error_type=ErrorTypes.PARSE)
 
         return result
 
@@ -218,7 +219,7 @@ class AsyncCrawler:
             )
             return result
         except asyncio.TimeoutError:
-            raise TransientError()
+            raise TransientError(error_type=ErrorTypes.TIMEOUT)
 
     async def fetch_and_parse_url(self, url: str) -> FetchResult:
         try:
@@ -227,13 +228,13 @@ class AsyncCrawler:
             return result
         except RetryCountExceeded as e:
             self.error_log.mark_failed(url)
-            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}")
+            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}", error_type=ErrorTypes.RETRY_EXCEEDED)
         except CUSTOM_ERRORS as e:
             self.error_log.mark_failed(url)
-            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}")
+            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}", error_type=e.error_type)
         except Exception as e:
             self.error_log.mark_failed(url)
-            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}")
+            return FetchResult(url=url, status=FetchResultStatus.FAILED, error=f"{e.__class__.__name__} in url {url}", error_type=ErrorTypes.UNKNOWN)
 
     async def fetch_and_parse_urls(self, urls: list[str]) -> dict[str, FetchResult]:
         tasks = [asyncio.create_task(self.fetch_and_parse_url(url)) for url in urls]

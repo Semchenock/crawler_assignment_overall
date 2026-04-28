@@ -1,24 +1,28 @@
+from abc import ABC
 from dataclasses import dataclass
 from typing import Optional, Union
 
+from src.async_crawler.enums import ErrorTypes
 
-class TransientError(Exception):
+
+class BaseError(Exception, ABC):
+    def __init__(self, error_type: ErrorTypes):
+        self.error_type = error_type
+
+class TransientError(BaseError):
     pass
 
 
-class PermanentError(Exception):
+class PermanentError(BaseError):
     pass
 
 
-class NetworkError(Exception):
+class NetworkError(BaseError):
     pass
 
 
-class ParseError(Exception):
+class ParseError(BaseError):
     pass
-
-
-ErrorType = Union[TransientError, PermanentError, NetworkError, ParseError]
 
 
 @dataclass
@@ -26,7 +30,7 @@ class RetryRule:
     max_retries: Optional[int]
     base_delay: Optional[float]
     backoff_factor: Optional[float]
-    error_type: ErrorType
+    error_type: BaseError
 
 
 class RetryCountExceeded(Exception):

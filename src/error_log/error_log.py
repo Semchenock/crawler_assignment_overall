@@ -4,11 +4,12 @@ import json
 from dataclasses import asdict, dataclass
 
 from src.async_crawler.enums import FetchResultStatus
-from src.retry_strategy.models import ErrorType
+from src.retry_strategy.models import BaseError
+
 
 @dataclass
 class LogEntity:
-    error_type: ErrorType
+    error_type: BaseError
     url: str
     try_count: int
     try_count_by_type: int
