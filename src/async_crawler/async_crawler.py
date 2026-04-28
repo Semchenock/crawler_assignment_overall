@@ -124,6 +124,7 @@ class AsyncCrawler:
             await self._process_robots_txt(url)
         except BlockedByRobots:
             logging.warning(f"🚫 Blocked by robots.txt {url}")
+            return ""
 
         async with self._acquire(url):
             logging.info(f"▶️ Start {url}")
