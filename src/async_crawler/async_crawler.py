@@ -167,26 +167,27 @@ class AsyncCrawler:
         except BlockedByRobots:
             raise PermanentError()
 
-        try:
-            async with self.session.get(url, timeout=timeout) as response:
-                response.raise_for_status()
-                response_content_type = response.headers.get("Content-Type")
-                status_code = response.status
-                text = await response.text()
-                return FetchResult(
-                    url=url,
-                    status=FetchResultStatus.FINISHED,
-                    html=text,
-                    content_type=response_content_type,
-                    status_code=status_code
-                )
-        except aiohttp.ClientResponseError as e:
-            error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
-            raise error()
-        except asyncio.TimeoutError:
-            raise TransientError()
-        except aiohttp.ClientError:
-            raise NetworkError()
+        async with self._acquire(url):
+            try:
+                async with self.session.get(url, timeout=timeout) as response:
+                    response.raise_for_status()
+                    response_content_type = response.headers.get("Content-Type")
+                    status_code = response.status
+                    text = await response.text()
+                    return FetchResult(
+                        url=url,
+                        status=FetchResultStatus.FINISHED,
+                        html=text,
+                        content_type=response_content_type,
+                        status_code=status_code
+                    )
+            except aiohttp.ClientResponseError as e:
+                error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
+                raise error()
+            except asyncio.TimeoutError:
+                raise TransientError()
+            except aiohttp.ClientError:
+                raise NetworkError()
 
 
     async def _fetch_and_parse_inner(self, url: str, timeout_cfg: dict) -> FetchResult:
