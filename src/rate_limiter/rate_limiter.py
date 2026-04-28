@@ -78,4 +78,4 @@ class RateLimiter:
             logging.warning("Rate limiter per domain is disabled")
             return
 
-        self.domain_next_allowed[url] = interval
+        self.domain_interval[url] = interval

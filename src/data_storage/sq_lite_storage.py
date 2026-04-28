@@ -1,4 +1,5 @@
 import aiosqlite
+import asyncio
 import json
 from datetime import datetime
 from dataclasses import fields, asdict
@@ -14,6 +15,7 @@ class SQLiteStorage(BaseDataStorage):
         self.batch_size = batch_size
         self.db = None
         self.buffer: list[DataItem] = []
+        self._lock = asyncio.Lock()
 
     @staticmethod
     def _python_to_sqlite_type(py_type):
@@ -87,16 +89,18 @@ class SQLiteStorage(BaseDataStorage):
         self.buffer.clear()
 
     async def _save_raw(self, data: DataItem):
-        await self._init_db()
-        self.buffer.append(data)
+        async with self._lock:
+            await self._init_db()
+            self.buffer.append(data)
 
-        if len(self.buffer) >= self.batch_size:
-            await self._flush()
+            if len(self.buffer) >= self.batch_size:
+                await self._flush()
 
     async def save(self, data: DataItem):
         await self._run_with_retry(data, self._save_raw, data)
 
     async def close(self):
-        await self._flush()
-        if self.db:
-            await self.db.close()
+        async with self._lock:
+            await self._flush()
+            if self.db:
+                await self.db.close()
