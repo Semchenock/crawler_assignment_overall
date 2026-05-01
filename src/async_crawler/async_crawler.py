@@ -21,6 +21,7 @@ from src.retry_strategy.models import PermanentError, TransientError, NetworkErr
 from src.retry_strategy.retry_stategy import RetryStrategy
 from src.robots_parser.robots_parser import RobotsParser
 from src.semaphore_manager.semaphore_manager import SemaphoreManager
+from src.sitemap_parser.sitemap_parser import SitemapParser
 from src.timeout_manager.timeout_manager import TimeoutConfig
 from src.data_storage.model import DataItem
 
@@ -51,6 +52,7 @@ class AsyncCrawler:
         )
         self.crawler_queue = CrawlerQueue()
         self.robots_parser = RobotsParser(respect_robots=respect_robots, user_agent=user_agent)
+        self.sitemap_parser = SitemapParser(user_agent=user_agent)
         self.error_log = ErrorLog()
         self.retry_strategy = RetryStrategy(error_log=self.error_log)
         self.timeout_config = TimeoutConfig()
@@ -63,6 +65,7 @@ class AsyncCrawler:
         self.same_domain_only: bool = False
         self.exclude_patern: Optional[str] = None
         self.include_patern: Optional[str] = None
+        self.processed_sitemaps: list[str] = []
         self.start_time = asyncio.get_event_loop().time()
 
     async def _init_session(self):
@@ -84,6 +87,11 @@ class AsyncCrawler:
     async def _process_robots_txt(self, url: str):
         try:
             await self.robots_parser.fetch_robots(url)
+
+            sitemap_url = self.robots_parser.get_sitemap_url(url, self.user_agent)
+            if sitemap_url is not None:
+                await self._process_sitemap(sitemap_url)
+
             interval = self.robots_parser.get_crawl_delay(url, self.user_agent)
             domain = urlparse(url).hostname
             if interval:
@@ -96,6 +104,17 @@ class AsyncCrawler:
         except Exception as e:
             logging.warning(f"Failed crawling robots.txt {e}")
             raise
+
+    async def _process_sitemap(self, url: str):
+        if any((p_url == url for p_url in self.processed_sitemaps)):
+            return
+
+        self.processed_sitemaps.append(url)
+        links_data = await self.sitemap_parser.fetch_sitemap(url)
+
+        for link_data in links_data:
+            if self.should_visit_url(url=link_data.link, depth=link_data.priority):
+                await self.crawler_queue.add_url(link_data.link, priority=link_data.priority, depth=link_data.priority)
 
     async def _save_to_storage(self, data: FetchResult):
         if data.status == FetchResultStatus.FAILED or data.parsed is None:
@@ -309,6 +328,7 @@ class AsyncCrawler:
         self.exclude_patern = None
         self.include_patern = None
         self.crawler_queue = CrawlerQueue()
+        self.processed_sitemaps = []
 
     async def crawl(
             self,
@@ -369,3 +389,4 @@ class AsyncCrawler:
             await self.storage.close()
 
         await self.robots_parser.close()
+        await self.sitemap_parser.close()

@@ -19,7 +19,6 @@ class CrawlerQueue:
     async def add_url(self, url: str, priority: int = 0, depth: int = 0):
         async with self.lock:
             if url in self.seen:
-                logging.warning(f"Duplicate url: {url}")
                 return
 
             self.seen.add(url)
