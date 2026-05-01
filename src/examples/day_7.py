@@ -9,8 +9,7 @@ STORAGE_TYPE="JSON"
 
 async def main():
     start_urls = [
-        # ✅ sitemap
-        "https://freesitemapgenerator.com/",
+        "https://httpbin.org/",
     ]
 
     json_storage = JSONStorage()
@@ -54,6 +53,9 @@ async def main():
     print("✅ Done crawling...\n")
 
     print(crawler.stats.get_stats())
+
+    crawler.stats.export_to_json()
+    crawler.stats.export_to_html_report()
 
     await crawler.close()
 
