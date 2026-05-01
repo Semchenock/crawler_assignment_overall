@@ -53,8 +53,7 @@ async def main():
 
     print("✅ Done crawling...\n")
 
-    print(crawler.storage.error_log)
-    print(crawler.processed_sitemaps)
+    print(crawler.stats.get_stats())
 
     await crawler.close()
 

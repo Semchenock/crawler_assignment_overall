@@ -11,6 +11,7 @@ import re
 
 from src.async_crawler.models import FetchResult, CrawlResult, BlockedByRobots
 from src.async_crawler.enums import FetchResultStatus, ErrorTypes
+from src.crawler_stats.crawler_stats import CrawlerStats
 from src.data_storage.base import BaseDataStorage
 from src.error_log.error_log import ErrorLog
 from src.html_parser.html_parser import HtmlParser
@@ -54,6 +55,7 @@ class AsyncCrawler:
         self.robots_parser = RobotsParser(respect_robots=respect_robots, user_agent=user_agent)
         self.sitemap_parser = SitemapParser(user_agent=user_agent)
         self.error_log = ErrorLog()
+        self.stats = CrawlerStats()
         self.retry_strategy = RetryStrategy(error_log=self.error_log)
         self.timeout_config = TimeoutConfig()
         self.storage = storage
@@ -200,6 +202,7 @@ class AsyncCrawler:
                     response_content_type = response.headers.get("Content-Type")
                     status_code = response.status
                     text = await response.text()
+                    self.stats.handle_successful_request(status_code)
                     return FetchResult(
                         url=url,
                         status=FetchResultStatus.FINISHED,
@@ -208,8 +211,10 @@ class AsyncCrawler:
                         status_code=status_code
                     )
             except aiohttp.ClientResponseError as e:
-                error = STATUS_CODES_TO_ERROR.get(e.status, PermanentError)
-                error_type = STATUS_CODES_TO_ERROR_TYPES.get(e.status, ErrorTypes.UNKNOWN)
+                status_code = e.status
+                error = STATUS_CODES_TO_ERROR.get(status_code, PermanentError)
+                error_type = STATUS_CODES_TO_ERROR_TYPES.get(status_code, ErrorTypes.UNKNOWN)
+                self.stats.handle_failed_request(status_code)
                 raise error(error_type=error_type)
             except asyncio.TimeoutError:
                 raise TransientError(error_type=ErrorTypes.TIMEOUT)
@@ -303,6 +308,7 @@ class AsyncCrawler:
             if result.status == FetchResultStatus.FINISHED:
                 print(f"Finished crawling {url}")
                 self.processed_urls[url] = result
+                self.stats.handle_processed_url(url)
                 await self.crawler_queue.mark_processed(url)
 
                 for link in result.parsed.links:
@@ -341,6 +347,7 @@ class AsyncCrawler:
             disable_speed_log: Optional[bool] = False,
     ) -> CrawlResult:
         self.reset()
+        self.stats.start_crawling()
         self.start_urls = start_urls
         self.max_depth = max_depth
         self.same_domain_only = same_domain_only
@@ -378,6 +385,8 @@ class AsyncCrawler:
 
         for w in workers:
             w.cancel()
+
+        self.stats.end_crawling()
 
         return CrawlResult(failed_urls=self.failed_urls, processed_urls=self.processed_urls)
 
