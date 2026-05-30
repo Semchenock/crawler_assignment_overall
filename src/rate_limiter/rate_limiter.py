@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 class _RateLimitContext:
-    def __init__(self, limiter: RateLimiter, url: str | None):
+    def __init__(self, limiter: "RateLimiter", url: str | None):
         self.limiter = limiter
         self.url = url
 

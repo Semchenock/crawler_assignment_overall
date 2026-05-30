@@ -33,3 +33,4 @@ ENV/
 /src/examples/*.jsonl
 /src/examples/*.csv
 /src/examples/*.db
+/src/examples/*.html

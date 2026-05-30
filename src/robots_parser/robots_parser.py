@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 import aiohttp
 
 from src.robots_parser.constants import DEFAULT_AGENT
+from src.robots_parser.model import ParsedRobotsData
 
 
 class RobotsParser:
@@ -32,11 +33,12 @@ class RobotsParser:
 
     @staticmethod
     def parse_robots_by_agents(text: str) -> dict:
-        result = defaultdict(lambda: {
-            "allow": [],
-            "disallow": [],
-            "crawl_delay": None
-        })
+        result = defaultdict(lambda: ParsedRobotsData(
+            allow=[],
+            disallow=[],
+            crawl_delay=None,
+            sitemap_url=None
+        ))
 
         current_agents = []
 
@@ -54,18 +56,26 @@ class RobotsParser:
             if line.lower().startswith("allow"):
                 path = line.split(":", 1)[1].strip()
                 for a in current_agents:
-                    result[a]["allow"].append(path)
+                    result[a].allow.append(path)
 
             elif line.lower().startswith("disallow"):
                 path = line.split(":", 1)[1].strip()
                 for a in current_agents:
-                    result[a]["disallow"].append(path)
+                    result[a].disallow.append(path)
 
             elif line.lower().startswith("crawl-delay"):
                 delay = line.split(":", 1)[1].strip()
                 try:
                     for a in current_agents:
-                        result[a]["crawl_delay"] = float(delay)
+                        result[a].crawl_delay = float(delay)
+                except ValueError:
+                    pass
+
+            elif line.lower().startswith("sitemap:"):
+                sitemap_url = line.split(":", 1)[1].strip()
+                try:
+                    for a in current_agents:
+                        result[a].sitemap_url = sitemap_url
                 except ValueError:
                     pass
 
@@ -94,7 +104,7 @@ class RobotsParser:
 
         return self.robots_by_domain.get(domain)
 
-    def _get_robots_data(self, url: str, user_agent: str = DEFAULT_AGENT) -> Optional[dict]:
+    def _get_robots_data(self, url: str, user_agent: str = DEFAULT_AGENT) -> Optional[ParsedRobotsData]:
         domain = urlparse(url).hostname
         robots_data_for_domain = self.robots_by_domain.get(domain)
         robots_data = robots_data_for_domain.get(user_agent)
@@ -115,8 +125,8 @@ class RobotsParser:
 
         path = urlparse(url).path
 
-        allow_rules = robots_data.get("allow", [])
-        disallow_rules = robots_data.get("disallow", [])
+        allow_rules = robots_data.allow
+        disallow_rules = robots_data.disallow
 
         matched_rule = None
         matched_type = None
@@ -147,8 +157,18 @@ class RobotsParser:
         if robots_data is None:
             return 0
 
-        return robots_data.get("crawl_delay", 0)
+        return robots_data.crawl_delay
 
+    def get_sitemap_url(self, url: str, user_agent: str = DEFAULT_AGENT) -> Optional[str]:
+        if not self.respect_robots:
+            return None
+
+        robots_data = self._get_robots_data(url, user_agent)
+
+        if robots_data is None:
+            return None
+
+        return robots_data.sitemap_url
 
     async def close(self):
         if self.session:

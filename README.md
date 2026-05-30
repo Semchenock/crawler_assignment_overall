@@ -58,3 +58,64 @@
 - 💾 Сохранять результаты в файлы и/или БД
 - 🤖 Работать с robots.txt
 - 📊 Показывать статистику работы (успешные/неудачные запросы, скорость)
+
+## День 7: финальная интеграция
+
+Главная точка входа — `AdvancedCrawler`. Он объединяет асинхронный краулер, очередь, sitemap, robots.txt, rate limiting, retry-стратегию, сохранение данных, статистику, HTML/JSON-отчёты и логирование.
+
+### CLI
+
+```bash
+python crawler.py --urls https://example.com --max-pages 100 --max-depth 2 --output results.json
+```
+
+Поддерживаемые параметры:
+- `--urls` — стартовые URL
+- `--sitemaps` — URL sitemap.xml
+- `--max-pages` — лимит страниц
+- `--max-depth` — максимальная глубина обхода
+- `--output` — файл для сохранения данных (`.json`, `.csv`, `.db`)
+- `--config` — YAML или JSON конфиг
+- `--respect-robots` — соблюдать robots.txt
+- `--rate-limit` — лимит запросов в секунду
+- `--stats-json` и `--stats-html` — экспорт статистики
+- `--log-file` и `--log-level` — настройки логирования
+
+### API
+
+```python
+import asyncio
+
+from crawler import AdvancedCrawler
+
+
+async def main():
+    crawler = AdvancedCrawler.from_config("src/examples/config.yaml")
+
+    try:
+        await crawler.crawl()
+
+        stats = crawler.get_stats()
+        print(f"Обработано: {stats['total_pages']} страниц")
+        print(f"Успешно: {stats['successful']}")
+        print(f"Ошибок: {stats['failed']}")
+
+        crawler.export_to_json("crawler_stats.json")
+        crawler.export_to_html_report("crawler_report.html")
+    finally:
+        await crawler.close()
+
+
+asyncio.run(main())
+```
+
+### Конфигурация
+
+Пример находится в `src/examples/config.yaml`. Конфиг может задавать стартовые URL, sitemap, лимиты конкурентности и скорости, фильтры URL, robots.txt, хранилище результатов, пути отчётов и ротацию логов.
+
+Для сохранения результатов используются:
+- `JSON` — JSON Lines файл
+- `CSV` — CSV файл
+- `SQLite` — база SQLite
+
+Статистика включает общее количество обработанных страниц, успешные и неудачные запросы, среднюю скорость, распределение по HTTP-статусам, топ доменов и время работы.
