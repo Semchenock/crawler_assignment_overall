@@ -1,12 +1,15 @@
 import asyncio
+import logging
 import random
 from collections import Counter
 from typing import Optional, Callable, Awaitable, Any
-import traceback
 
 from .models import RetryRule, RetryCountExceeded
 from .constants import DEFAULT_RULES, CUSTOM_ERRORS
 from ..error_log.error_log import ErrorLog, LogEntity
+
+
+logger = logging.getLogger(__name__)
 
 
 class RetryStrategy:
@@ -20,7 +23,7 @@ class RetryStrategy:
 
     def _get_backoff(self, rule: Optional[RetryRule], error_count: int) -> float:
         base_delay = rule.base_delay if rule and rule.base_delay else self.base_delay
-        backoff_factor = rule.backoff_factor if rule and rule.backoff_factor else self.backoff_factor\
+        backoff_factor = rule.backoff_factor if rule and rule.backoff_factor else self.backoff_factor
 
         backoff = base_delay * pow(backoff_factor, error_count)
         return backoff
@@ -33,11 +36,11 @@ class RetryStrategy:
 
         for i in range(1, self.max_retries+1):
             try:
-                print(f"try #{i} url: {url}")
+                logger.debug("Retry attempt %s for %s", i, url)
                 result = await coro(url, attempt=i, *args, **kwargs)
                 return result
             except CUSTOM_ERRORS as e:
-                print(f"caught {e.__class__.__name__} in url {url}")
+                logger.warning("Caught %s in url %s", e.__class__.__name__, url)
 
                 rule = next((r for r in self.retry_on if isinstance(e, r.error_type)), None)
 
@@ -64,9 +67,7 @@ class RetryStrategy:
                 await asyncio.sleep(backoff + jitter)
 
             except Exception as e:
-                print(f"caught UNKNOWN error {e.__class__.__name__} in url {url}")
-                print(e)
-                traceback.print_exc()
+                logger.exception("Caught unknown error %s in url %s", e.__class__.__name__, url)
 
 
         raise RetryCountExceeded("Global retry limit exceeded")

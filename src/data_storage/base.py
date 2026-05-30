@@ -12,12 +12,12 @@ class BaseDataStorage(ABC):
     def _append_error(self, error: Exception, data: DataItem, try_count: int) -> None:
         self.error_log.append(ErrorLogEntity(data = data, error = error, try_count=try_count))
 
-    async def _run_with_retry(self, data, coro: Callable[..., Awaitable[Any]], *args, **kwargs):
+    async def _run_with_retry(self, data_item, coro: Callable[..., Awaitable[Any]], *args, **kwargs):
         for i in range(1, self.max_retries+1):
             try:
                 return await coro(*args, **kwargs)
             except Exception as e:
-                self._append_error(error=e, data=data, try_count=i)
+                self._append_error(error=e, data=data_item, try_count=i)
 
         return None
 

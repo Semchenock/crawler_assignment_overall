@@ -37,9 +37,10 @@ class CrawlerStats:
         self.successful_requests_count += 1
         self.status_codes[status_code] += 1
 
-    def handle_failed_request(self, status_code: int):
+    def handle_failed_request(self, status_code: Optional[int] = None):
         self.failed_requests_count += 1
-        self.status_codes[status_code] += 1
+        if status_code is not None:
+            self.status_codes[status_code] += 1
 
     def handle_processed_url(self, url: str):
         domain = urlparse(url).hostname
@@ -52,24 +53,39 @@ class CrawlerStats:
             reverse=True
         )
 
-        top_error_codes = sorted(
+        status_code_distribution = dict(sorted(self.status_codes.items()))
+
+        top_status_codes = sorted(
             self.status_codes.items(),
             key=lambda x: x[1],
             reverse=True
         )
+        top_error_codes = [
+            (status_code, count)
+            for status_code, count in top_status_codes
+            if status_code >= 400
+        ]
 
         total_processed_urls = sum(self.processed_urls_by_domain.values())
 
         end_time = time.monotonic() if self.ended_at is None else self.ended_at
 
-        total_time = end_time - self.started_at
+        total_time = end_time - self.started_at if self.started_at is not None else 0
+        average_speed = total_processed_urls / total_time if total_time > 0 else 0
+        average_processing_time = total_time / total_processed_urls if total_processed_urls else 0
 
         return {
+            'total_pages': total_processed_urls,
+            'successful': self.successful_requests_count,
+            'failed': self.failed_requests_count,
+            'status_code_distribution': status_code_distribution,
             'total_processed_urls': total_processed_urls,
             'successful_requests_count': self.successful_requests_count,
             'failed_requests_count': self.failed_requests_count,
-            'average_speed': total_time / total_processed_urls if total_processed_urls !=0 else 0,
+            'average_speed': average_speed,
+            'average_processing_time': average_processing_time,
             'top_domains': top_domains,
+            'top_status_codes': top_status_codes,
             'top_error_codes': top_error_codes,
             'total_time': total_time,
         }
@@ -88,6 +104,7 @@ class CrawlerStats:
         data = self.get_stats()
 
         df_domains = pd.DataFrame(data['top_domains'], columns=["domain", "count"])
+        df_status_codes = pd.DataFrame(data['top_status_codes'], columns=["status_code", "count"])
         df_errors = pd.DataFrame(data['top_error_codes'], columns=["error_code", "count"])
 
         domains_chart = px.bar(
@@ -104,6 +121,13 @@ class CrawlerStats:
             title="Top Error Codes"
         )
 
+        status_codes_chart = px.bar(
+            df_status_codes,
+            x="status_code",
+            y="count",
+            title="Status Code Distribution"
+        )
+
         summary_chart = go.Figure(data=[
             go.Bar(name="Success", x=["Requests"], y=[data['successful_requests_count']]),
             go.Bar(name="Failed", x=["Requests"], y=[data['failed_requests_count']]),
@@ -111,10 +135,16 @@ class CrawlerStats:
         summary_chart.update_layout(barmode='group', title="Success vs Failed")
 
         domains_html = domains_chart.to_html(full_html=False, include_plotlyjs='cdn')
-        errors_html = errors_chart.to_html(full_html=False, include_plotlyjs=False)
+        status_codes_html = status_codes_chart.to_html(full_html=False, include_plotlyjs=False)
+        errors_html = (
+            errors_chart.to_html(full_html=False, include_plotlyjs=False)
+            if not df_errors.empty
+            else "<p>No HTTP error status codes recorded.</p>"
+        )
         summary_html = summary_chart.to_html(full_html=False, include_plotlyjs=False)
 
         table_domains = df_domains.to_html(index=False)
+        table_status_codes = df_status_codes.to_html(index=False)
         table_errors = df_errors.to_html(index=False)
 
         html = f"""
@@ -162,7 +192,8 @@ class CrawlerStats:
                 <li>Total processed URLs: {data['total_processed_urls']}</li>
                 <li>Successful requests: {data['successful_requests_count']}</li>
                 <li>Failed requests: {data['failed_requests_count']}</li>
-                <li>Average latency (sec): {data['average_speed']:.4f}</li>
+                <li>Average speed (pages/sec): {data['average_speed']:.4f}</li>
+                <li>Average processing time (sec/page): {data['average_processing_time']:.4f}</li>
                 <li>Total time (sec): {data['total_time']:.2f}</li>
             </ul>
             {summary_html}
@@ -172,6 +203,12 @@ class CrawlerStats:
             <h2>Top Domains</h2>
             {domains_html}
             {table_domains}
+        </div>
+
+        <div class="card">
+            <h2>Status Code Distribution</h2>
+            {status_codes_html}
+            {table_status_codes}
         </div>
 
         <div class="card">

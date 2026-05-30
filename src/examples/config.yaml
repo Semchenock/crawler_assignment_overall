@@ -1,0 +1,43 @@
+start_urls:
+  - "https://httpbin.org/html"
+  - "https://httpbin.org/deny"
+  - "https://httpbin.org/delay/3"
+  - "https://httpbin.org/status/503"
+  - "https://httpbin.org/status/429"
+  - "https://httpbin.org/status/404"
+  - "https://httpbin.org/status/403"
+  - "https://httpbin.org/status/500"
+  - "http://nonexistent-domain-12345.com"
+  - "https://httpbin.org/get"
+  - "https://www.w3schools.com"
+
+sitemap_urls: []
+
+storage:
+  type: "CSV"
+  path: "data.csv"
+  batch_size: 10
+
+max_concurrent: 3
+max_per_domain: 2
+min_interval: 0.2
+rate_limit: 5.0
+max_jitter: 0.0
+respect_robots: true
+user_agent: "MyCrawlerBot/1.0"
+max_pages: 100
+max_depth: 1
+same_domain_only: true
+include_pattern:
+exclude_pattern:
+disable_speed_log: false
+
+path:
+  stats_json: "crawler_stats.json"
+  stats_html: "crawler_report.html"
+
+logging:
+  level: "INFO"
+  file: "crawler.log"
+  max_bytes: 1000000
+  backup_count: 3
